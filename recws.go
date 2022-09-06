@@ -46,14 +46,17 @@ type RecConn struct {
 	KeepAliveTimeout time.Duration
 	// NonVerbose suppress connecting/reconnecting messages.
 	NonVerbose bool
+	// AllowKeepAliveDataResponse allows recognize data response like keepalive response
+	AllowKeepAliveDataResponse bool
 
-	isConnected bool
-	mu          sync.RWMutex
-	url         string
-	reqHeader   http.Header
-	httpResp    *http.Response
-	dialErr     error
-	dialer      *websocket.Dialer
+	isConnected       bool
+	mu                sync.RWMutex
+	url               string
+	reqHeader         http.Header
+	httpResp          *http.Response
+	dialErr           error
+	dialer            *websocket.Dialer
+	keepAliveResponse *keepAliveResponse
 
 	*websocket.Conn
 }
@@ -118,6 +121,9 @@ func (rc *RecConn) ReadMessage() (messageType int, message []byte, err error) {
 		if err != nil {
 			rc.CloseAndReconnect()
 		}
+	}
+	if err == nil {
+		rc.getKeepAliveResponse().setLastDataResponse()
 	}
 
 	return
@@ -190,6 +196,13 @@ func (rc *RecConn) ReadJSON(v interface{}) error {
 	}
 
 	return err
+}
+
+func (rc *RecConn) getKeepAliveResponse() *keepAliveResponse {
+	rc.mu.RLock()
+	ka := rc.keepAliveResponse
+	rc.mu.RUnlock()
+	return ka
 }
 
 func (rc *RecConn) setURL(url string) {
@@ -385,13 +398,12 @@ func (rc *RecConn) writeControlPingMessage() error {
 
 func (rc *RecConn) keepAlive() {
 	var (
-		keepAliveResponse = new(keepAliveResponse)
-		ticker            = time.NewTicker(rc.getKeepAliveTimeout())
+		ticker = time.NewTicker(rc.getKeepAliveTimeout())
 	)
 
 	rc.mu.Lock()
 	rc.Conn.SetPongHandler(func(msg string) error {
-		keepAliveResponse.setLastResponse()
+		rc.getKeepAliveResponse().setLastResponse()
 		return nil
 	})
 	rc.mu.Unlock()
@@ -409,7 +421,7 @@ func (rc *RecConn) keepAlive() {
 			}
 
 			<-ticker.C
-			if time.Since(keepAliveResponse.getLastResponse()) > rc.getKeepAliveTimeout() {
+			if time.Since(rc.getKeepAliveResponse().getLastResponse()) > rc.getKeepAliveTimeout() {
 				rc.CloseAndReconnect()
 				return
 			}
@@ -430,6 +442,8 @@ func (rc *RecConn) connect() {
 		rc.dialErr = err
 		rc.isConnected = err == nil
 		rc.httpResp = httpResp
+		rc.keepAliveResponse = new(keepAliveResponse)
+		rc.keepAliveResponse.allowDataResponse = rc.AllowKeepAliveDataResponse
 		rc.mu.Unlock()
 
 		if err == nil {
