@@ -5,6 +5,7 @@ package recws
 import (
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"log"
 	"math/rand"
 	"net/http"
@@ -44,6 +45,8 @@ type RecConn struct {
 	// KeepAliveTimeout is an interval for sending ping/pong messages
 	// disabled if 0
 	KeepAliveTimeout time.Duration
+	// LogHandler handles all log messages
+	LogHandler func(v LogValues)
 	// NonVerbose suppress connecting/reconnecting messages.
 	NonVerbose bool
 	// AllowKeepAliveDataResponse allows recognize data response like keepalive response
@@ -59,6 +62,18 @@ type RecConn struct {
 	keepAliveResponse *keepAliveResponse
 
 	*websocket.Conn
+}
+
+// LogValues type includes values for send to logger
+type LogValues struct {
+	// Msg is main message
+	Msg string
+	// Err is error for separate and display it
+	Err error
+	// Url is connection url
+	Url string
+	// Fatal is tag of fatal error
+	Fatal bool
 }
 
 // CloseAndReconnect will try to reconnect.
@@ -85,13 +100,12 @@ func (rc *RecConn) getConn() *websocket.Conn {
 // Close closes the underlying network connection without
 // sending or waiting for a close frame.
 func (rc *RecConn) Close() {
-	if rc.getConn() != nil {
-		rc.mu.Lock()
+	rc.mu.Lock()
+	if rc.Conn != nil {
 		rc.Conn.Close()
-		rc.mu.Unlock()
 	}
-
-	rc.setIsConnected(false)
+	rc.isConnected = false
+	rc.mu.Unlock()
 }
 
 // Shutdown gracefully closes the connection by sending the websocket.CloseMessage.
@@ -101,7 +115,7 @@ func (rc *RecConn) Shutdown(writeWait time.Duration) {
 	err := rc.WriteControl(websocket.CloseMessage, msg, time.Now().Add(writeWait))
 	if err != nil && err != websocket.ErrCloseSent {
 		// If close message could not be sent, then close without the handshake.
-		log.Printf("Shutdown: %v", err)
+		rc.log(LogValues{Err: err, Msg: "Shutdown"})
 		rc.Close()
 	}
 }
@@ -328,7 +342,7 @@ func (rc *RecConn) Dial(urlStr string, reqHeader http.Header) {
 	urlStr, err := rc.parseURL(urlStr)
 
 	if err != nil {
-		log.Fatalf("Dial: %v", err)
+		rc.log(LogValues{Msg: "Dial", Err: err, Fatal: true})
 	}
 
 	// Config
@@ -354,6 +368,16 @@ func (rc *RecConn) GetURL() string {
 	defer rc.mu.RUnlock()
 
 	return rc.url
+}
+
+func (rc *RecConn) log(v LogValues) {
+	if rc.LogHandler != nil {
+		rc.LogHandler(v)
+	} else if v.Err != nil {
+		log.Printf("ERROR: %+v: %+v (%+v)\n", v.Msg, v.Err, v.Url)
+	} else {
+		log.Printf("%+v (%+v)\n", v.Msg, v.Url)
+	}
 }
 
 func (rc *RecConn) getNonVerbose() bool {
@@ -417,11 +441,13 @@ func (rc *RecConn) keepAlive() {
 			}
 
 			if err := rc.writeControlPingMessage(); err != nil {
-				log.Println(err)
+				rc.log(LogValues{Err: err})
 			}
 
 			<-ticker.C
-			if time.Since(rc.getKeepAliveResponse().getLastResponse()) > rc.getKeepAliveTimeout() {
+			timeoutOffset := time.Millisecond * 500
+			if time.Since(rc.getKeepAliveResponse().getLastResponse()) > rc.getKeepAliveTimeout()+timeoutOffset {
+				rc.log(LogValues{Err: errors.New("keepalive timeout"), Msg: "Reconnect", Url: rc.url})
 				rc.CloseAndReconnect()
 				return
 			}
@@ -448,15 +474,15 @@ func (rc *RecConn) connect() {
 
 		if err == nil {
 			if !rc.getNonVerbose() {
-				log.Printf("Dial: connection was successfully established with %s\n", rc.url)
+				rc.log(LogValues{Msg: "Dial: connection was successfully established", Url: rc.url})
 			}
 
 			if rc.hasSubscribeHandler() {
 				if err := rc.SubscribeHandler(); err != nil {
-					log.Fatalf("Dial: connect handler failed with %s", err.Error())
+					rc.log(LogValues{Msg: "Dial: connect handler failed", Err: err, Fatal: true})
 				}
 				if !rc.getNonVerbose() {
-					log.Printf("Dial: connect handler was successfully established with %s\n", rc.url)
+					rc.log(LogValues{Msg: "Dial: connect handler was successfully established", Url: rc.url})
 				}
 			}
 
@@ -468,8 +494,7 @@ func (rc *RecConn) connect() {
 		}
 
 		if !rc.getNonVerbose() {
-			log.Println(err)
-			log.Println("Dial: will try again in", nextItvl, "seconds.")
+			rc.log(LogValues{Err: err, Msg: fmt.Sprintf("Dial: will try again in %+v seconds", nextItvl)})
 		}
 
 		time.Sleep(nextItvl)
