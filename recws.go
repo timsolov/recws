@@ -451,6 +451,9 @@ func (rc *RecConn) connect() {
 
 	for {
 		nextItvl := b.Duration()
+		if !rc.getNonVerbose() {
+			rc.log(LogValues{Msg: "Dial: start", Url: rc.url})
+		}
 		wsConn, httpResp, err := rc.dialer.Dial(rc.url, rc.reqHeader)
 
 		rc.mu.Lock()
