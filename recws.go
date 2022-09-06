@@ -373,6 +373,8 @@ func (rc *RecConn) GetURL() string {
 func (rc *RecConn) log(v LogValues) {
 	if rc.LogHandler != nil {
 		rc.LogHandler(v)
+	} else if v.Fatal {
+		log.Fatalf("FATAL: %+v: %+v (%+v)\n", v.Msg, v.Err, v.Url)
 	} else if v.Err != nil {
 		log.Printf("ERROR: %+v: %+v (%+v)\n", v.Msg, v.Err, v.Url)
 	} else {
@@ -494,7 +496,7 @@ func (rc *RecConn) connect() {
 		}
 
 		if !rc.getNonVerbose() {
-			rc.log(LogValues{Err: err, Msg: fmt.Sprintf("Dial: will try again in %+v seconds", nextItvl)})
+			rc.log(LogValues{Err: err, Msg: fmt.Sprintf("Dial: will try again in %+v seconds", nextItvl), Url: rc.url})
 		}
 
 		time.Sleep(nextItvl)
