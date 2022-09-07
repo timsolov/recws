@@ -338,11 +338,12 @@ func (rc *RecConn) SetTLSClientConfig(tlsClientConfig *tls.Config) {
 // the origin (Origin), subprotocols (Sec-WebSocket-Protocol) and cookies
 // (Cookie). Use GetHTTPResponse() method for the response.Header to get
 // the selected subprotocol (Sec-WebSocket-Protocol) and cookies (Set-Cookie).
-func (rc *RecConn) Dial(urlStr string, reqHeader http.Header) {
+func (rc *RecConn) Dial(urlStr string, reqHeader http.Header) error {
 	urlStr, err := rc.parseURL(urlStr)
 
 	if err != nil {
 		rc.log(LogValues{Msg: "Dial", Err: err, Fatal: true})
+		return err
 	}
 
 	// Config
@@ -360,6 +361,7 @@ func (rc *RecConn) Dial(urlStr string, reqHeader http.Header) {
 
 	// wait on first attempt
 	time.Sleep(rc.getHandshakeTimeout())
+	return nil
 }
 
 // GetURL returns current connection url
@@ -463,6 +465,9 @@ func (rc *RecConn) connect() {
 
 	for {
 		nextItvl := b.Duration()
+		if !rc.getNonVerbose() {
+			rc.log(LogValues{Msg: "Dial: start", Url: rc.url})
+		}
 		wsConn, httpResp, err := rc.dialer.Dial(rc.url, rc.reqHeader)
 
 		rc.mu.Lock()
@@ -482,8 +487,7 @@ func (rc *RecConn) connect() {
 			if rc.hasSubscribeHandler() {
 				if err := rc.SubscribeHandler(); err != nil {
 					rc.log(LogValues{Msg: "Dial: connect handler failed", Err: err, Fatal: true})
-				}
-				if !rc.getNonVerbose() {
+				} else if !rc.getNonVerbose() {
 					rc.log(LogValues{Msg: "Dial: connect handler was successfully established", Url: rc.url})
 				}
 			}
