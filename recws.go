@@ -40,11 +40,13 @@ type RecConn struct {
 	Proxy func(*http.Request) (*url.URL, error)
 	// Client TLS config to use on reconnect
 	TLSClientConfig *tls.Config
-	// SubscribeHandler fires after the connection successfully establish.
+	// SubscribeHandler fires after the connection successfully establish. Must be quick
 	SubscribeHandler func() error
 	// KeepAliveTimeout is an interval for sending ping/pong messages
 	// disabled if 0
 	KeepAliveTimeout time.Duration
+	// ReconnectHandler signals of reconnects for metrics. Must be quick
+	ReconnectHandler func()
 	// LogHandler handles all log messages
 	LogHandler func(v LogValues)
 	// NonVerbose suppress connecting/reconnecting messages.
@@ -73,9 +75,17 @@ type LogValues struct {
 	Fatal bool
 }
 
+func (rc *RecConn) handleReconnect() {
+	rc.mu.RLock()
+	handler := rc.ReconnectHandler
+	rc.mu.RUnlock()
+	handler()
+}
+
 // CloseAndReconnect will try to reconnect.
 func (rc *RecConn) CloseAndReconnect() {
 	rc.Close()
+	rc.handleReconnect()
 	go rc.connect()
 }
 
