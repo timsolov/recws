@@ -485,8 +485,10 @@ func (rc *RecConn) connect() {
 		rc.dialErr = err
 		rc.isConnected = err == nil
 		rc.httpResp = httpResp
-		rc.keepAliveResponse = new(keepAliveResponse)
-		rc.keepAliveResponse.allowDataResponse = rc.AllowKeepAliveDataResponse
+		if rc.keepAliveResponse == nil {
+			rc.keepAliveResponse = new(keepAliveResponse)
+			rc.keepAliveResponse.allowDataResponse = rc.AllowKeepAliveDataResponse
+		}
 		rc.mu.Unlock()
 
 		if err == nil {
