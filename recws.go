@@ -82,7 +82,9 @@ func (rc *RecConn) handleReconnect() {
 	rc.mu.RLock()
 	handler := rc.ReconnectHandler
 	rc.mu.RUnlock()
-	handler()
+	if handler != nil {
+		handler()
+	}
 }
 
 // CloseAndReconnect will try to reconnect.
