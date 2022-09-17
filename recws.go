@@ -139,17 +139,18 @@ func (rc *RecConn) Shutdown(writeWait time.Duration) {
 func (rc *RecConn) ReadMessage() (messageType int, message []byte, err error) {
 	err = ErrNotConnected
 	if rc.IsConnected() {
-		messageType, message, err = rc.Conn.ReadMessage()
+		conn := rc.getConn()
+		messageType, message, err = conn.ReadMessage()
 		if websocket.IsCloseError(err, websocket.CloseNormalClosure) {
 			rc.Close()
 			return messageType, message, nil
 		}
-		if err != nil {
+		if err != nil && conn == rc.getConn() {
 			rc.CloseAndReconnect()
 		}
-	}
-	if err == nil {
-		rc.getKeepAliveResponse().setLastDataResponse()
+		if err == nil {
+			rc.getKeepAliveResponse().setLastDataResponse()
+		}
 	}
 
 	return
@@ -211,13 +212,17 @@ func (rc *RecConn) WriteJSON(v interface{}) error {
 func (rc *RecConn) ReadJSON(v interface{}) error {
 	err := ErrNotConnected
 	if rc.IsConnected() {
-		err = rc.Conn.ReadJSON(v)
+		conn := rc.getConn()
+		err = conn.ReadJSON(v)
 		if websocket.IsCloseError(err, websocket.CloseNormalClosure) {
 			rc.Close()
 			return nil
 		}
-		if err != nil {
+		if err != nil && conn == rc.getConn() {
 			rc.CloseAndReconnect()
+		}
+		if err == nil {
+			rc.getKeepAliveResponse().setLastDataResponse()
 		}
 	}
 
