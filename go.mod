@@ -1,4 +1,4 @@
-module github.com/nikepan/recws
+module github.com/timsolov/recws
 
 go 1.18
 
